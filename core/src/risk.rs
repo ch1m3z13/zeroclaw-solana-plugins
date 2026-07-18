@@ -1,10 +1,20 @@
 use crate::types::{Extension, LpInfo, MintInfo, RiskAssessment, RiskScore, TokenLargestAccount};
 
+/// Well-known issuer mints whose active mint/freeze authority is expected
+/// (held by a regulated issuer) rather than a rug signal. USDC + USDT.
+pub const DEFAULT_TRUSTED_ISSUERS: &[&str] = &[
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+];
+
 /// Configuration for risk thresholds.
 pub struct RiskConfig {
     pub max_holders_pct: f64,
     pub max_transfer_fee_pct: f64,
     pub min_tvl_usd: f64,
+    /// Mints on this allowlist skip the authority + no-LP hard-reds (score
+    /// stays Green with an informational note). Other signals still apply.
+    pub trusted_issuers: Vec<String>,
 }
 
 impl Default for RiskConfig {
@@ -13,6 +23,10 @@ impl Default for RiskConfig {
             max_holders_pct: 50.0,
             max_transfer_fee_pct: 5.0,
             min_tvl_usd: 10_000.0,
+            trusted_issuers: DEFAULT_TRUSTED_ISSUERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 }
@@ -31,10 +45,26 @@ impl RiskConfig {
             .get("min_tvl_usd")
             .and_then(|v| v.parse().ok())
             .unwrap_or(10_000.0);
+        // Comma-separated override; falls back to the built-in allowlist.
+        let trusted_issuers = section
+            .get("trusted_issuers")
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                DEFAULT_TRUSTED_ISSUERS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
         Self {
             max_holders_pct,
             max_transfer_fee_pct,
             min_tvl_usd,
+            trusted_issuers,
         }
     }
 }
@@ -52,16 +82,27 @@ pub fn assess_risk(
     let mut score = RiskScore::Green;
     let mut reasons = Vec::new();
 
-    // 1. Mint authority — hard red if active
+    let is_trusted = config
+        .trusted_issuers
+        .iter()
+        .any(|m| m == &mint_info.address);
+
+    // 1. Mint authority — hard red if active, unless a trusted issuer
     if mint_info.mint_authority.is_some() {
-        score = RiskScore::Red;
-        reasons.push("Mint authority is active — supply can be inflated at any time".to_string());
+        if is_trusted {
+            reasons.push("Mint/freeze authority held by a known issuer — expected".to_string());
+        } else {
+            score = RiskScore::Red;
+            reasons
+                .push("Mint authority is active — supply can be inflated at any time".to_string());
+        }
     }
 
-    // 2. Freeze authority — hard red if active
-    if mint_info.freeze_authority.is_some() {
+    // 2. Freeze authority — hard red if active, unless a trusted issuer
+    if mint_info.freeze_authority.is_some() && !is_trusted {
         score = RiskScore::Red;
-        reasons.push("Freeze authority is active — tokens can be frozen by third party".to_string());
+        reasons
+            .push("Freeze authority is active — tokens can be frozen by third party".to_string());
     }
 
     // 3. Token-2022 extensions
@@ -69,7 +110,10 @@ pub fn assess_risk(
         match ext {
             Extension::PermanentDelegate { .. } => {
                 score = RiskScore::Red;
-                reasons.push("Permanent delegate extension — tokens can be taken without consent".to_string());
+                reasons.push(
+                    "Permanent delegate extension — tokens can be taken without consent"
+                        .to_string(),
+                );
             }
             Extension::TransferFee {
                 fee_basis_points, ..
@@ -122,7 +166,7 @@ pub fn assess_risk(
             score = score.max(RiskScore::Amber);
             reasons.push(format!("Low liquidity: ${:.0} TVL", lp.tvl_usd));
         }
-    } else {
+    } else if !is_trusted {
         score = RiskScore::Red;
         reasons.push("No liquidity pool found — token may be untradeable".to_string());
     }
@@ -131,7 +175,7 @@ pub fn assess_risk(
     if mint_info.supply == 0 {
         score = RiskScore::Red;
         reasons.push("Zero supply — no tokens in circulation".to_string());
-    } else if mint_info.supply > 1_000_000_000_000 {
+    } else if mint_info.supply > 1_000_000_000_000 && !is_trusted {
         score = score.max(RiskScore::Amber);
         reasons.push("Extremely high supply — likely meme/scam token".to_string());
     }
@@ -152,7 +196,7 @@ mod tests {
 
     fn green_mint() -> MintInfo {
         MintInfo {
-            address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
+            address: "So1anaTokenMint1111111111111111111111111111".to_string(),
             mint_authority: None,
             freeze_authority: None,
             supply: 1_000_000_000,
@@ -165,10 +209,20 @@ mod tests {
     fn green_path() {
         let mint = green_mint();
         let holders = vec![
-            TokenLargestAccount { address: "a".into(), amount: 100_000_000 },
-            TokenLargestAccount { address: "b".into(), amount: 80_000_000 },
+            TokenLargestAccount {
+                address: "a".into(),
+                amount: 100_000_000,
+            },
+            TokenLargestAccount {
+                address: "b".into(),
+                amount: 80_000_000,
+            },
         ];
-        let lp = LpInfo { tvl_usd: 50_000.0, pool_age_hours: 100.0, dex: "jupiter".into() };
+        let lp = LpInfo {
+            tvl_usd: 50_000.0,
+            pool_age_hours: 100.0,
+            dex: "jupiter".into(),
+        };
         let result = assess_risk(&mint, &[], &holders, Some(&lp), &RiskConfig::default());
         assert_eq!(result.risk, RiskScore::Green);
         assert!(result.reasons.is_empty());
@@ -189,45 +243,119 @@ mod tests {
         mint.freeze_authority = Some("freeze1111111111111111111111111111111111".into());
         let result = assess_risk(&mint, &[], &[], None, &RiskConfig::default());
         assert_eq!(result.risk, RiskScore::Red);
-        assert!(result.reasons.iter().any(|r| r.contains("Freeze authority")));
+        assert!(result
+            .reasons
+            .iter()
+            .any(|r| r.contains("Freeze authority")));
+    }
+
+    #[test]
+    fn trusted_issuer_green_despite_authorities() {
+        // USDC-like: active mint + freeze authority, no LP info, but allowlisted.
+        let mut mint = green_mint();
+        mint.address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into();
+        mint.mint_authority = Some("circle11111111111111111111111111111111111".into());
+        mint.freeze_authority = Some("circle11111111111111111111111111111111111".into());
+        let result = assess_risk(&mint, &[], &[], None, &RiskConfig::default());
+        assert_eq!(result.risk, RiskScore::Green);
+        assert!(result.reasons.iter().any(|r| r.contains("known issuer")));
+    }
+
+    #[test]
+    fn trusted_issuer_still_red_on_real_signal() {
+        // Allowlisted mint but with a genuine danger (permanent delegate) still reds.
+        let mut mint = green_mint();
+        mint.address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into();
+        mint.mint_authority = Some("circle11111111111111111111111111111111111".into());
+        let ext = Extension::PermanentDelegate {
+            delegate: "x".into(),
+        };
+        let result = assess_risk(&mint, &[ext], &[], None, &RiskConfig::default());
+        assert_eq!(result.risk, RiskScore::Red);
     }
 
     #[test]
     fn red_on_permanent_delegate() {
-        let ext = Extension::PermanentDelegate { delegate: "x".into() };
+        let ext = Extension::PermanentDelegate {
+            delegate: "x".into(),
+        };
         let result = assess_risk(&green_mint(), &[ext], &[], None, &RiskConfig::default());
         assert_eq!(result.risk, RiskScore::Red);
-        assert!(result.reasons.iter().any(|r| r.contains("Permanent delegate")));
+        assert!(result
+            .reasons
+            .iter()
+            .any(|r| r.contains("Permanent delegate")));
     }
 
     #[test]
     fn amber_on_high_transfer_fee() {
-        let ext = Extension::TransferFee { fee_basis_points: 350, max_fee: 1000 };
-        let lp = LpInfo { tvl_usd: 50_000.0, pool_age_hours: 100.0, dex: "jupiter".into() };
-        let result = assess_risk(&green_mint(), &[ext], &[], Some(&lp), &RiskConfig::default());
+        let ext = Extension::TransferFee {
+            fee_basis_points: 350,
+            max_fee: 1000,
+        };
+        let lp = LpInfo {
+            tvl_usd: 50_000.0,
+            pool_age_hours: 100.0,
+            dex: "jupiter".into(),
+        };
+        let result = assess_risk(
+            &green_mint(),
+            &[ext],
+            &[],
+            Some(&lp),
+            &RiskConfig::default(),
+        );
         assert_eq!(result.risk, RiskScore::Amber);
         assert!(result.reasons.iter().any(|r| r.contains("Transfer fee")));
     }
 
     #[test]
     fn red_on_extreme_transfer_fee() {
-        let ext = Extension::TransferFee { fee_basis_points: 600, max_fee: 1000 };
-        let lp = LpInfo { tvl_usd: 50_000.0, pool_age_hours: 100.0, dex: "jupiter".into() };
-        let result = assess_risk(&green_mint(), &[ext], &[], Some(&lp), &RiskConfig::default());
+        let ext = Extension::TransferFee {
+            fee_basis_points: 600,
+            max_fee: 1000,
+        };
+        let lp = LpInfo {
+            tvl_usd: 50_000.0,
+            pool_age_hours: 100.0,
+            dex: "jupiter".into(),
+        };
+        let result = assess_risk(
+            &green_mint(),
+            &[ext],
+            &[],
+            Some(&lp),
+            &RiskConfig::default(),
+        );
         assert_eq!(result.risk, RiskScore::Red);
     }
 
     #[test]
     fn amber_on_transfer_hook() {
-        let ext = Extension::TransferHook { program_id: "hook11111111111111111111111111111111".into() };
-        let lp = LpInfo { tvl_usd: 50_000.0, pool_age_hours: 100.0, dex: "jupiter".into() };
-        let result = assess_risk(&green_mint(), &[ext], &[], Some(&lp), &RiskConfig::default());
+        let ext = Extension::TransferHook {
+            program_id: "hook11111111111111111111111111111111".into(),
+        };
+        let lp = LpInfo {
+            tvl_usd: 50_000.0,
+            pool_age_hours: 100.0,
+            dex: "jupiter".into(),
+        };
+        let result = assess_risk(
+            &green_mint(),
+            &[ext],
+            &[],
+            Some(&lp),
+            &RiskConfig::default(),
+        );
         assert_eq!(result.risk, RiskScore::Amber);
     }
 
     #[test]
     fn red_on_holder_concentration() {
-        let holders = vec![TokenLargestAccount { address: "a".into(), amount: 600_000_000 }];
+        let holders = vec![TokenLargestAccount {
+            address: "a".into(),
+            amount: 600_000_000,
+        }];
         let result = assess_risk(&green_mint(), &[], &holders, None, &RiskConfig::default());
         assert_eq!(result.risk, RiskScore::Red);
         assert!(result.reasons.iter().any(|r| r.contains("Top holder")));
@@ -242,7 +370,11 @@ mod tests {
 
     #[test]
     fn amber_on_low_lp() {
-        let lp = LpInfo { tvl_usd: 5_000.0, pool_age_hours: 10.0, dex: "jupiter".into() };
+        let lp = LpInfo {
+            tvl_usd: 5_000.0,
+            pool_age_hours: 10.0,
+            dex: "jupiter".into(),
+        };
         let result = assess_risk(&green_mint(), &[], &[], Some(&lp), &RiskConfig::default());
         assert_eq!(result.risk, RiskScore::Amber);
     }
@@ -252,7 +384,9 @@ mod tests {
         let mut mint = green_mint();
         mint.mint_authority = Some("a".into());
         mint.freeze_authority = Some("b".into());
-        let ext = Extension::PermanentDelegate { delegate: "c".into() };
+        let ext = Extension::PermanentDelegate {
+            delegate: "c".into(),
+        };
         let result = assess_risk(&mint, &[ext], &[], None, &RiskConfig::default());
         assert!(result.reasons.len() <= 2);
     }

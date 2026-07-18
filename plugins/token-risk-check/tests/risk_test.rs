@@ -2,9 +2,11 @@
 
 use std::collections::HashMap;
 use zeroclaw_solana_core::mint;
-use zeroclaw_solana_core::rpc::{MockTransport, RpcClient};
-use zeroclaw_solana_core::types::{ConfigSection, Extension, MintInfo, RiskScore, TokenLargestAccount};
 use zeroclaw_solana_core::risk::{assess_risk, RiskConfig};
+use zeroclaw_solana_core::rpc::{MockTransport, RpcClient};
+use zeroclaw_solana_core::types::{
+    ConfigSection, Extension, MintInfo, RiskScore, TokenLargestAccount,
+};
 
 // Pure-logic tests using the risk scoring engine directly.
 // These don't need a live RPC — they test the scoring algorithm with fixture data.
@@ -15,7 +17,7 @@ fn default_config() -> RiskConfig {
 
 fn green_mint() -> MintInfo {
     MintInfo {
-        address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(),
+        address: "So1anaTokenMint1111111111111111111111111111".into(),
         mint_authority: None,
         freeze_authority: None,
         supply: 1_000_000_000,
@@ -24,19 +26,38 @@ fn green_mint() -> MintInfo {
     }
 }
 
+fn usdc_mint() -> MintInfo {
+    let mut m = green_mint();
+    m.address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into();
+    m
+}
+
 fn green_holders() -> Vec<TokenLargestAccount> {
     vec![
-        TokenLargestAccount { address: "a".into(), amount: 100_000_000 },
-        TokenLargestAccount { address: "b".into(), amount: 80_000_000 },
-        TokenLargestAccount { address: "c".into(), amount: 60_000_000 },
+        TokenLargestAccount {
+            address: "a".into(),
+            amount: 100_000_000,
+        },
+        TokenLargestAccount {
+            address: "b".into(),
+            amount: 80_000_000,
+        },
+        TokenLargestAccount {
+            address: "c".into(),
+            amount: 60_000_000,
+        },
     ]
 }
 
 #[test]
 fn usdc_like_green() {
-    let result = assess_risk(&green_mint(), &[], &green_holders(), None, &default_config());
-    assert_eq!(result.risk, RiskScore::Red); // red because no LP info in pure test
-    // In real usage with Jupiter LP data, this would be green
+    // A trusted issuer (USDC) with no LP info still scores Green — the
+    // allowlist suppresses the authority + no-LP hard-reds.
+    let mut mint = usdc_mint();
+    mint.mint_authority = Some("circle11111111111111111111111111111111111".into());
+    mint.freeze_authority = Some("circle11111111111111111111111111111111111".into());
+    let result = assess_risk(&mint, &[], &green_holders(), None, &default_config());
+    assert_eq!(result.risk, RiskScore::Green);
 }
 
 #[test]
@@ -59,37 +80,58 @@ fn freeze_authority_active_is_red() {
 
 #[test]
 fn permanent_delegate_is_red() {
-    let ext = Extension::PermanentDelegate { delegate: "x".into() };
+    let ext = Extension::PermanentDelegate {
+        delegate: "x".into(),
+    };
     let result = assess_risk(&green_mint(), &[ext], &[], None, &default_config());
     assert_eq!(result.risk, RiskScore::Red);
 }
 
 #[test]
 fn high_transfer_fee_is_red() {
-    let ext = Extension::TransferFee { fee_basis_points: 600, max_fee: 1000 };
+    let ext = Extension::TransferFee {
+        fee_basis_points: 600,
+        max_fee: 1000,
+    };
     let result = assess_risk(&green_mint(), &[ext], &[], None, &default_config());
     assert_eq!(result.risk, RiskScore::Red);
 }
 
 #[test]
 fn moderate_transfer_fee_is_amber() {
-    let ext = Extension::TransferFee { fee_basis_points: 250, max_fee: 1000 };
-    let lp = zeroclaw_solana_core::types::LpInfo { tvl_usd: 50_000.0, pool_age_hours: 100.0, dex: "jupiter".into() };
+    let ext = Extension::TransferFee {
+        fee_basis_points: 250,
+        max_fee: 1000,
+    };
+    let lp = zeroclaw_solana_core::types::LpInfo {
+        tvl_usd: 50_000.0,
+        pool_age_hours: 100.0,
+        dex: "jupiter".into(),
+    };
     let result = assess_risk(&green_mint(), &[ext], &[], Some(&lp), &default_config());
     assert_eq!(result.risk, RiskScore::Amber);
 }
 
 #[test]
 fn transfer_hook_is_amber() {
-    let ext = Extension::TransferHook { program_id: "hook11111111111111111111111111111111".into() };
-    let lp = zeroclaw_solana_core::types::LpInfo { tvl_usd: 50_000.0, pool_age_hours: 100.0, dex: "jupiter".into() };
+    let ext = Extension::TransferHook {
+        program_id: "hook11111111111111111111111111111111".into(),
+    };
+    let lp = zeroclaw_solana_core::types::LpInfo {
+        tvl_usd: 50_000.0,
+        pool_age_hours: 100.0,
+        dex: "jupiter".into(),
+    };
     let result = assess_risk(&green_mint(), &[ext], &[], Some(&lp), &default_config());
     assert_eq!(result.risk, RiskScore::Amber);
 }
 
 #[test]
 fn holder_concentration_is_red() {
-    let holders = vec![TokenLargestAccount { address: "a".into(), amount: 600_000_000 }];
+    let holders = vec![TokenLargestAccount {
+        address: "a".into(),
+        amount: 600_000_000,
+    }];
     let result = assess_risk(&green_mint(), &[], &holders, None, &default_config());
     assert_eq!(result.risk, RiskScore::Red);
 }
@@ -103,7 +145,11 @@ fn no_lp_is_red() {
 
 #[test]
 fn low_lp_is_amber() {
-    let lp = zeroclaw_solana_core::types::LpInfo { tvl_usd: 5_000.0, pool_age_hours: 10.0, dex: "jupiter".into() };
+    let lp = zeroclaw_solana_core::types::LpInfo {
+        tvl_usd: 5_000.0,
+        pool_age_hours: 10.0,
+        dex: "jupiter".into(),
+    };
     let result = assess_risk(&green_mint(), &[], &[], Some(&lp), &default_config());
     assert_eq!(result.risk, RiskScore::Amber);
 }
@@ -113,7 +159,9 @@ fn reasons_capped_at_two() {
     let mut mint = green_mint();
     mint.mint_authority = Some("a".into());
     mint.freeze_authority = Some("b".into());
-    let ext = Extension::PermanentDelegate { delegate: "c".into() };
+    let ext = Extension::PermanentDelegate {
+        delegate: "c".into(),
+    };
     let result = assess_risk(&mint, &[ext], &[], None, &default_config());
     assert!(result.reasons.len() <= 2);
 }
@@ -122,7 +170,10 @@ fn reasons_capped_at_two() {
 fn custom_config_thresholds() {
     let mut config = RiskConfig::default();
     config.max_holders_pct = 30.0;
-    let holders = vec![TokenLargestAccount { address: "a".into(), amount: 400_000_000 }]; // 40%
+    let holders = vec![TokenLargestAccount {
+        address: "a".into(),
+        amount: 400_000_000,
+    }]; // 40%
     let result = assess_risk(&green_mint(), &[], &holders, None, &config);
     assert_eq!(result.risk, RiskScore::Red); // 40% > 30% threshold
 }
@@ -168,7 +219,9 @@ fn check_token_risk_end_to_end_active_mint_red() {
     let rpc = RpcClient::with_transport(
         "http://mock".into(),
         None,
-        Box::new(MockTransport { handler: Box::new(handler) }),
+        Box::new(MockTransport {
+            handler: Box::new(handler),
+        }),
     );
 
     // Drive decode_mint + assess_risk directly through the same code path
