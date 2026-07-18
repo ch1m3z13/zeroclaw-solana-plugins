@@ -1,0 +1,8 @@
+# plugins/payment-watch/manifest.toml
+name = "payment-watch"
+version = "0.1.0"
+description = "Watch an address for expected SPL token payments and report when they land"
+author = ""
+wasm_path = "payment_watch.wasm"
+capabilities = ["tool"]
+permissions = ["http_client", "config_read"]

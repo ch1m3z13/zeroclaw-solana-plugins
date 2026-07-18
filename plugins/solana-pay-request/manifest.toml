@@ -1,0 +1,8 @@
+# plugins/solana-pay-request/manifest.toml
+name = "solana-pay-request"
+version = "0.1.0"
+description = "Generate Solana Pay transfer-request URLs with built-in token risk checking"
+author = ""
+wasm_path = "solana_pay_request.wasm"
+capabilities = ["tool"]
+permissions = ["http_client", "config_read"]

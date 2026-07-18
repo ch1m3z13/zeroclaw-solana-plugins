@@ -1,0 +1,25 @@
+# core/Cargo.toml
+[package]
+name = "zeroclaw-solana-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pure-Rust Solana primitives for ZeroClaw WASM plugins: RPC, mint decoding, risk scoring, Pay URLs"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+waki = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bs58 = "0.5"
+borsh = "1"
+sha2 = "0.10"
+log = "0.4"
+
+[dev-dependencies]
+serde_json = "1"
+
+[workspace]
