@@ -11,10 +11,15 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wit-bindgen = "0.46"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zeroclaw-solana-core = { path = "../../core" }
+token-risk-check = { path = "../token-risk-check", default-features = false }
+
+# wit-bindgen + waki are only needed for the wasm component build.
+[target.'cfg(target_family = "wasm")'.dependencies]
+wit-bindgen = "0.46"
+waki = "0.5"
 
 [profile.release]
 opt-level = "s"

@@ -2,7 +2,10 @@
 // Thin wasm shim — pure logic lives in the core crate / risk.rs
 pub mod risk;
 
-#[cfg(target_family = "wasm")]
+// Component export glue is gated behind the `component` feature so this crate
+// can be used as a dependency (pure risk logic only) without emitting duplicate
+// component symbols into a downstream plugin's wasm build.
+#[cfg(all(target_family = "wasm", feature = "component"))]
 mod component {
     wit_bindgen::generate!({
         path: "../../wit/v0",
