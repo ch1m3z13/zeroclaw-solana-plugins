@@ -1,1 +1,333 @@
-// TODO
+use crate::types::{AccountData, Blockhash, TokenAccount, TokenLargestAccount};
+use serde::{Deserialize, Serialize};
+
+/// Abstraction over the blocking HTTP transport.
+///
+/// The wasm build uses `waki` (see `WakiTransport`). Host builds and tests
+/// inject a `MockTransport` so the core can be exercised with no live network
+/// and no wasm toolchain (plan global constraint: "host-run tests, mock RPC").
+pub trait Transport {
+    fn post(&self, url: &str, api_key: Option<&str>, body: &[u8]) -> Result<Vec<u8>, String>;
+}
+
+/// JSON-RPC 2.0 client over a pluggable transport.
+pub struct RpcClient {
+    url: String,
+    api_key: Option<String>,
+    transport: Box<dyn Transport>,
+}
+
+#[derive(Serialize)]
+struct JsonRpcRequest {
+    jsonrpc: &'static str,
+    id: u64,
+    method: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct JsonRpcResponse {
+    result: Option<serde_json::Value>,
+    error: Option<JsonRpcError>,
+}
+
+#[derive(Deserialize, Debug)]
+struct JsonRpcError {
+    code: i64,
+    message: String,
+}
+
+/// In-memory transport for host tests (mock RPC).
+pub struct MockTransport {
+    pub handler: Box<dyn Fn(&str, Option<&str>, &[u8]) -> Result<Vec<u8>, String>>,
+}
+
+impl Transport for MockTransport {
+    fn post(&self, url: &str, api_key: Option<&str>, body: &[u8]) -> Result<Vec<u8>, String> {
+        (self.handler)(url, api_key, body)
+    }
+}
+
+#[cfg(target_family = "wasm")]
+struct WakiTransport;
+
+#[cfg(target_family = "wasm")]
+impl Transport for WakiTransport {
+    fn post(&self, url: &str, api_key: Option<&str>, body: &[u8]) -> Result<Vec<u8>, String> {
+        let mut headers = vec![("Content-Type", "application/json")];
+        let auth;
+        if let Some(key) = api_key {
+            auth = format!("Bearer {key}");
+            headers.push(("Authorization", auth.as_str()));
+        }
+        let response = waki::Client::new()
+            .post(url)
+            .body(body.to_vec())
+            .headers(headers.iter().map(|(k, v)| (*k, *v)))
+            .send()
+            .map_err(|e| format!("http: {e}"))?;
+        let status = response.status();
+        let bytes = response.body().read_to_end().map_err(|e| format!("read: {e}"))?;
+        if status != 200 {
+            return Err(format!("rpc {status}: {}", String::from_utf8_lossy(&bytes)));
+        }
+        Ok(bytes)
+    }
+}
+
+impl RpcClient {
+    /// Construct for the wasm runtime (uses `waki` over wasi:http).
+    #[cfg(target_family = "wasm")]
+    pub fn new(url: String, api_key: Option<String>) -> Self {
+        Self {
+            url,
+            api_key,
+            transport: Box::new(WakiTransport),
+        }
+    }
+
+    /// Construct with an explicit transport — used by host tests with `MockTransport`.
+    pub fn with_transport(url: String, api_key: Option<String>, transport: Box<dyn Transport>) -> Self {
+        Self {
+            url,
+            api_key,
+            transport,
+        }
+    }
+
+    fn post_json(&self, method: &'static str, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params,
+        };
+        let body = serde_json::to_vec(&request).map_err(|e| format!("serialize: {e}"))?;
+        let bytes = self.transport.post(&self.url, self.api_key.as_deref(), &body)?;
+        let text = String::from_utf8(bytes).map_err(|e| format!("utf8: {e}"))?;
+        let resp: JsonRpcResponse = serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))?;
+        if let Some(err) = resp.error {
+            return Err(format!("rpc error {}: {}", err.code, err.message));
+        }
+        resp.result.ok_or_else(|| "rpc: null result".to_string())
+    }
+
+    pub fn get_account(&self, pubkey: &str) -> Result<Option<AccountData>, String> {
+        let params = serde_json::json!([pubkey, { "encoding": "base64" }]);
+        let result = self.post_json("getAccountInfo", Some(params))?;
+        let value = result.get("value").and_then(|v| v.as_object());
+        match value {
+            Some(obj) if !obj.is_empty() => {
+                let data_b64 = obj
+                    .get("data")
+                    .and_then(|d| d.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let data = base64_decode(data_b64)?;
+                let owner = obj.get("owner").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let lamports = obj.get("lamports").and_then(|v| v.as_u64()).unwrap_or(0);
+                Ok(Some(AccountData { data, owner, lamports }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub fn get_latest_blockhash(&self, commitment: &str) -> Result<Blockhash, String> {
+        let params = serde_json::json!([{ "commitment": commitment }]);
+        let result = self.post_json("getLatestBlockhash", Some(params))?;
+        let hash = result
+            .get("value")
+            .and_then(|v| v.get("blockhash"))
+            .and_then(|v| v.as_str())
+            .ok_or("missing blockhash")?
+            .to_string();
+        Ok(Blockhash(hash))
+    }
+
+    pub fn get_token_accounts_by_owner(
+        &self,
+        owner: &str,
+        mint: Option<&str>,
+    ) -> Result<Vec<TokenAccount>, String> {
+        let mint_filter = if let Some(m) = mint {
+            serde_json::json!({ "mint": m })
+        } else {
+            serde_json::json!({ "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" })
+        };
+        let params = serde_json::json!([
+            owner,
+            mint_filter,
+            { "encoding": "jsonParsed" }
+        ]);
+        let result = self.post_json("getTokenAccountsByOwner", Some(params))?;
+        let accounts = result
+            .get("value")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let info = item.get("account")?.get("data")?.get("parsed")?.get("info")?;
+                        Some(TokenAccount {
+                            mint: info.get("mint")?.as_str()?.to_string(),
+                            owner: info.get("owner")?.as_str()?.to_string(),
+                            amount: info.get("tokenAmount")?.get("uiAmount")?.as_f64().unwrap_or(0.0) as u64,
+                            delegate: info.get("delegate").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            state: info.get("state")?.as_str()?.to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(accounts)
+    }
+
+    pub fn get_token_largest_accounts(&self, mint: &str) -> Result<Vec<TokenLargestAccount>, String> {
+        let params = serde_json::json!([mint]);
+        let result = self.post_json("getTokenLargestAccounts", Some(params))?;
+        let accounts = result
+            .get("value")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        Some(TokenLargestAccount {
+                            address: item.get("address")?.as_str()?.to_string(),
+                            amount: item.get("amount")?.as_str()?.parse().ok()?,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(accounts)
+    }
+
+    pub fn send_transaction(&self, tx_bytes: &[u8]) -> Result<String, String> {
+        let encoded = base64_encode(tx_bytes);
+        let params = serde_json::json!([encoded, { "encoding": "base64" }]);
+        let result = self.post_json("sendTransaction", Some(params))?;
+        result.as_str().map(|s| s.to_string()).ok_or_else(|| "missing signature".to_string())
+    }
+}
+
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    let table: [i16; 256] = build_b64_table();
+    let s = s.trim_end_matches('=');
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(s.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        let n = chunk.len();
+        let mut buf = [0u8; 4];
+        for i in 0..n {
+            let v = table[chunk[i] as usize];
+            if v < 0 {
+                return Err("invalid base64".to_string());
+            }
+            buf[i] = v as u8;
+        }
+        if n >= 1 {
+            result.push((buf[0] << 2) | (buf[1] >> 4));
+        }
+        if n >= 3 {
+            result.push((buf[1] << 4) | (buf[2] >> 2));
+        }
+        if n >= 4 {
+            result.push((buf[2] << 6) | buf[3]);
+        }
+    }
+    Ok(result)
+}
+
+fn build_b64_table() -> [i16; 256] {
+    let mut t = [-1i16; 256];
+    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (i, &b) in alphabet.iter().enumerate() {
+        t[b as usize] = i as i16;
+    }
+    t
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity(data.len() * 4 / 3 + 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(TABLE[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(TABLE[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_for(method: &str, value: serde_json::Value) -> RpcClient {
+        let method = method.to_string();
+        let resp = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": value });
+        let handler = move |_url: &str, _key: Option<&str>, req: &[u8]| {
+            let parsed: serde_json::Value = serde_json::from_slice(req).unwrap();
+            assert_eq!(parsed["method"], method);
+            Ok(serde_json::to_vec(&resp).unwrap())
+        };
+        RpcClient::with_transport(
+            "http://mock".into(),
+            None,
+            Box::new(MockTransport { handler: Box::new(handler) }),
+        )
+    }
+
+    #[test]
+    fn get_account_parses_base64_data() {
+        let account_data = base64_encode(b"hello-solana");
+        let value = serde_json::json!({
+            "value": {
+                "data": [account_data, "base64"],
+                "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                "lamports": 2039280
+            }
+        });
+        let client = mock_for("getAccountInfo", value);
+        let acct = client.get_account("Mint1111").unwrap().unwrap();
+        assert_eq!(acct.data, b"hello-solana");
+        assert_eq!(acct.owner, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+        assert_eq!(acct.lamports, 2039280);
+    }
+
+    #[test]
+    fn get_token_largest_accounts_parses() {
+        let value = serde_json::json!({
+            "value": [
+                { "address": "Holder1111", "amount": "500000", "decimals": 6, "uiAmount": 0.5 },
+                { "address": "Holder2222", "amount": "300000", "decimals": 6, "uiAmount": 0.3 }
+            ]
+        });
+        let client = mock_for("getTokenLargestAccounts", value);
+        let largest = client.get_token_largest_accounts("Mint1111").unwrap();
+        assert_eq!(largest.len(), 2);
+        assert_eq!(largest[0].address, "Holder1111");
+        assert_eq!(largest[0].amount, 500000);
+    }
+
+    #[test]
+    fn base64_round_trips() {
+        let data = b"any byte sequence \x00\x01\x02\xff";
+        let enc = base64_encode(data);
+        let dec = base64_decode(&enc).unwrap();
+        assert_eq!(dec, data);
+    }
+}
