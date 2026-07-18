@@ -11,13 +11,17 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
-waki = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bs58 = "0.5"
 borsh = "1"
 sha2 = "0.10"
 log = "0.4"
+
+# waki is a wasi:http client — only resolvable/buildable for wasm targets.
+# Host builds (cargo check / cargo test) and the mock transport must not pull it.
+[target.'cfg(target_family = "wasm")'.dependencies]
+waki = "0.5"
 
 [dev-dependencies]
 serde_json = "1"
