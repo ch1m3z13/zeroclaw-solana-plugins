@@ -8,7 +8,7 @@
 
 package zeroclaw:plugin@0.1.0;
 
-/// Structured logging import (host-provided). Mirrors the WIT `logging` import.
+/// Structured logging import (host-provided).
 interface logging {
     enum log-level {
         trace,
@@ -18,10 +18,13 @@ interface logging {
         error,
     }
 
+    /// Coarse action a tool performed (used for host audit/history).
     enum plugin-action {
-        start,
+        read,
+        success,
         complete,
         fail,
+        timeout,
     }
 
     enum plugin-outcome {
@@ -30,6 +33,7 @@ interface logging {
         unknown,
     }
 
+    /// Structured log record sent to the host from a plugin tool.
     record plugin-event {
         function-name: string,
         action: plugin-action,

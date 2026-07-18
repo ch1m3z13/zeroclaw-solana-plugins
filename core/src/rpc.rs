@@ -232,6 +232,31 @@ impl RpcClient {
         let result = self.post_json("sendTransaction", Some(params))?;
         result.as_str().map(|s| s.to_string()).ok_or_else(|| "missing signature".to_string())
     }
+
+    /// Get recent transaction signatures for an address (getSignaturesForAddress).
+    pub fn get_recent_signatures(
+        &self,
+        address: &str,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let params = serde_json::json!([address, { "limit": limit }]);
+        let result = self.post_json("getSignaturesForAddress", Some(params))?;
+        result
+            .as_array()
+            .cloned()
+            .ok_or_else(|| "expected array of signatures".to_string())
+    }
+
+    /// Get a confirmed transaction by signature (getTransaction, jsonParsed).
+    pub fn get_transaction(&self, signature: &str) -> Result<Option<serde_json::Value>, String> {
+        let params = serde_json::json!([signature, { "encoding": "jsonParsed" }]);
+        let result = self.post_json("getTransaction", Some(params))?;
+        if result.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(result))
+        }
+    }
 }
 
 #[cfg(test)]
