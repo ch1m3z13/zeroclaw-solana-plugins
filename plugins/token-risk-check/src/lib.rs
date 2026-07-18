@@ -10,6 +10,7 @@ mod component {
     wit_bindgen::generate!({
         path: "../../wit/v0",
         world: "tool-plugin",
+        features: ["plugins-wit-v0"],
     });
 
     use std::collections::HashMap;
@@ -17,7 +18,10 @@ mod component {
     use crate::risk::check_token_risk;
     use exports::zeroclaw::plugin::plugin_info::Guest as PluginInfo;
     use exports::zeroclaw::plugin::tool::{Guest as Tool, ToolResult};
-    use zeroclaw::plugin::logging::{log_record, LogLevel, PluginAction, PluginEvent, PluginOutcome};
+    use zeroclaw::plugin::logging::{
+        log_record, LogLevel, PluginAction, PluginEvent, PluginOutcome,
+    };
+    use zeroclaw::plugin::types::JsonString;
 
     struct TokenRiskCheck;
 
@@ -55,7 +59,7 @@ mod component {
                 .to_string()
         }
 
-        fn parameters_schema() -> String {
+        fn parameters_schema() -> JsonString {
             serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -67,9 +71,10 @@ mod component {
                 "required": ["mint"]
             })
             .to_string()
+            .into()
         }
 
-        fn execute(args: String) -> Result<ToolResult, String> {
+        fn execute(args: JsonString) -> Result<ToolResult, String> {
             let parsed: ExecuteArgs = match serde_json::from_str(&args) {
                 Ok(a) => a,
                 Err(e) => {

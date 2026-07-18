@@ -75,9 +75,10 @@ cd plugins/solana-pay-request && cargo build --target wasm32-wasip2 --release
 cd plugins/payment-watch && cargo build --target wasm32-wasip2 --release
 ```
 
-> **WIT note:** this repo vendors a minimal local `wit/v0/tool-plugin.wit` placeholder so
-> the components build offline. Vendor the official `zeroclaw-plugins` WIT before opening a PR —
-> the runtime's real ABI may differ from this stand-in.
+> **WIT note:** this repo vendors the official `zeroclaw-plugins` WIT (`wit/v0/`, multi-file
+> package `zeroclaw:plugin@0.1.0`, gated behind `@unstable(feature = plugins-wit-v0)`). It is
+> byte-aligned with the runtime via `wit/UPSTREAM_REF`. Components build offline and are
+> ABI-compatible with the real ZeroClaw host. Advance the pin and `wit/v0` together in one change.
 
 ## Custody design
 

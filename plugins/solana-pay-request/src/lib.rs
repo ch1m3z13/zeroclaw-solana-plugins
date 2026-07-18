@@ -7,6 +7,7 @@ mod component {
     wit_bindgen::generate!({
         path: "../../wit/v0",
         world: "tool-plugin",
+        features: ["plugins-wit-v0"],
     });
 
     use std::collections::HashMap;
@@ -17,6 +18,7 @@ mod component {
     use zeroclaw::plugin::logging::{
         log_record, LogLevel, PluginAction, PluginEvent, PluginOutcome,
     };
+    use zeroclaw::plugin::types::JsonString;
 
     struct SolanaPayRequest;
 
@@ -62,7 +64,7 @@ mod component {
                 .to_string()
         }
 
-        fn parameters_schema() -> String {
+        fn parameters_schema() -> JsonString {
             serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -90,9 +92,10 @@ mod component {
                 "required": ["recipient", "amount"]
             })
             .to_string()
+            .into()
         }
 
-        fn execute(args: String) -> Result<ToolResult, String> {
+        fn execute(args: JsonString) -> Result<ToolResult, String> {
             let parsed: ExecuteArgs = match serde_json::from_str(&args) {
                 Ok(a) => a,
                 Err(e) => {
