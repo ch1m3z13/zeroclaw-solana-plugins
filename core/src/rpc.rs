@@ -125,7 +125,7 @@ impl RpcClient {
                     .and_then(|a| a.first())
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let data = base64_decode(data_b64)?;
+                let data = crate::encoding::decode_base64(data_b64)?;
                 let owner = obj.get("owner").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let lamports = obj.get("lamports").and_then(|v| v.as_u64()).unwrap_or(0);
                 Ok(Some(AccountData { data, owner, lamports }))
@@ -204,77 +204,17 @@ impl RpcClient {
     }
 
     pub fn send_transaction(&self, tx_bytes: &[u8]) -> Result<String, String> {
-        let encoded = base64_encode(tx_bytes);
+        let encoded = crate::encoding::encode_base64(tx_bytes);
         let params = serde_json::json!([encoded, { "encoding": "base64" }]);
         let result = self.post_json("sendTransaction", Some(params))?;
         result.as_str().map(|s| s.to_string()).ok_or_else(|| "missing signature".to_string())
     }
 }
 
-fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    let table: [i16; 256] = build_b64_table();
-    let s = s.trim_end_matches('=');
-    let bytes = s.as_bytes();
-    let mut result = Vec::with_capacity(s.len() * 3 / 4);
-    for chunk in bytes.chunks(4) {
-        let n = chunk.len();
-        let mut buf = [0u8; 4];
-        for i in 0..n {
-            let v = table[chunk[i] as usize];
-            if v < 0 {
-                return Err("invalid base64".to_string());
-            }
-            buf[i] = v as u8;
-        }
-        if n >= 1 {
-            result.push((buf[0] << 2) | (buf[1] >> 4));
-        }
-        if n >= 3 {
-            result.push((buf[1] << 4) | (buf[2] >> 2));
-        }
-        if n >= 4 {
-            result.push((buf[2] << 6) | buf[3]);
-        }
-    }
-    Ok(result)
-}
-
-fn build_b64_table() -> [i16; 256] {
-    let mut t = [-1i16; 256];
-    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    for (i, &b) in alphabet.iter().enumerate() {
-        t[b as usize] = i as i16;
-    }
-    t
-}
-
-fn base64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity(data.len() * 4 / 3 + 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        result.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
-        result.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            result.push(TABLE[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        if chunk.len() > 2 {
-            result.push(TABLE[(triple & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encoding::{decode_base64, encode_base64};
 
     fn mock_for(method: &str, value: serde_json::Value) -> RpcClient {
         let method = method.to_string();
@@ -293,7 +233,7 @@ mod tests {
 
     #[test]
     fn get_account_parses_base64_data() {
-        let account_data = base64_encode(b"hello-solana");
+        let account_data = encode_base64(b"hello-solana");
         let value = serde_json::json!({
             "value": {
                 "data": [account_data, "base64"],
@@ -326,8 +266,8 @@ mod tests {
     #[test]
     fn base64_round_trips() {
         let data = b"any byte sequence \x00\x01\x02\xff";
-        let enc = base64_encode(data);
-        let dec = base64_decode(&enc).unwrap();
+        let enc = encode_base64(data);
+        let dec = decode_base64(&enc).unwrap();
         assert_eq!(dec, data);
     }
 }
