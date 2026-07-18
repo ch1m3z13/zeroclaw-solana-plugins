@@ -49,6 +49,16 @@ impl Transport for MockTransport {
     }
 }
 
+/// Host-only default transport. Errors if a request is actually issued —
+/// host code must inject `MockTransport` (or a real one) before calling RPC.
+struct NullTransport;
+
+impl Transport for NullTransport {
+    fn post(&self, _url: &str, _api_key: Option<&str>, _body: &[u8]) -> Result<Vec<u8>, String> {
+        Err("RpcClient::new on host has no transport; inject one via with_transport".to_string())
+    }
+}
+
 #[cfg(target_family = "wasm")]
 struct WakiTransport;
 
@@ -84,6 +94,18 @@ impl RpcClient {
             url,
             api_key,
             transport: Box::new(WakiTransport),
+        }
+    }
+
+    /// Construct for the host. The host path must inject a real transport
+    /// (e.g. `MockTransport`) before issuing requests; calling a method on a
+    /// `new`-built client will error with a clear message.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn new(_url: String, _api_key: Option<String>) -> Self {
+        Self {
+            url: _url,
+            api_key: _api_key,
+            transport: Box::new(NullTransport),
         }
     }
 
