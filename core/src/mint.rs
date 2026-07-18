@@ -19,11 +19,7 @@ pub fn decode_mint(data: &[u8], address: &str) -> Result<MintInfo, String> {
     }
 
     let mint_authority = decode_pubkey_option(&data[0..36]);
-    let supply = u64::from_le_bytes(
-        data[36..44]
-            .try_into()
-            .map_err(|_| "supply parse")?,
-    );
+    let supply = u64::from_le_bytes(data[36..44].try_into().map_err(|_| "supply parse")?);
     let decimals = data[44];
     let is_initialized = data[45] != 0;
     let freeze_authority = decode_pubkey_option(&data[46..82]);
@@ -55,8 +51,11 @@ pub fn decode_extensions(data: &[u8]) -> Result<Vec<Extension>, String> {
     let mut offset = MINT_SIZE;
 
     while offset + 4 <= data.len() {
-        let type_id =
-            u16::from_le_bytes(data[offset..offset + 2].try_into().map_err(|_| "type parse")?);
+        let type_id = u16::from_le_bytes(
+            data[offset..offset + 2]
+                .try_into()
+                .map_err(|_| "type parse")?,
+        );
         let length = u16::from_le_bytes(
             data[offset + 2..offset + 4]
                 .try_into()

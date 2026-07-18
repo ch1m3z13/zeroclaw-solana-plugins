@@ -111,7 +111,11 @@ impl RpcClient {
     }
 
     /// Construct with an explicit transport — used by host tests with `MockTransport`.
-    pub fn with_transport(url: String, api_key: Option<String>, transport: Box<dyn Transport>) -> Self {
+    pub fn with_transport(
+        url: String,
+        api_key: Option<String>,
+        transport: Box<dyn Transport>,
+    ) -> Self {
         Self {
             url,
             api_key,
@@ -119,7 +123,11 @@ impl RpcClient {
         }
     }
 
-    fn post_json(&self, method: &'static str, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    fn post_json(
+        &self,
+        method: &'static str,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0",
             id: 1,
@@ -127,9 +135,12 @@ impl RpcClient {
             params,
         };
         let body = serde_json::to_vec(&request).map_err(|e| format!("serialize: {e}"))?;
-        let bytes = self.transport.post(&self.url, self.api_key.as_deref(), &body)?;
+        let bytes = self
+            .transport
+            .post(&self.url, self.api_key.as_deref(), &body)?;
         let text = String::from_utf8(bytes).map_err(|e| format!("utf8: {e}"))?;
-        let resp: JsonRpcResponse = serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))?;
+        let resp: JsonRpcResponse =
+            serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))?;
         if let Some(err) = resp.error {
             return Err(format!("rpc error {}: {}", err.code, err.message));
         }
@@ -149,9 +160,17 @@ impl RpcClient {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let data = crate::encoding::decode_base64(data_b64)?;
-                let owner = obj.get("owner").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let owner = obj
+                    .get("owner")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let lamports = obj.get("lamports").and_then(|v| v.as_u64()).unwrap_or(0);
-                Ok(Some(AccountData { data, owner, lamports }))
+                Ok(Some(AccountData {
+                    data,
+                    owner,
+                    lamports,
+                }))
             }
             _ => Ok(None),
         }
@@ -191,12 +210,23 @@ impl RpcClient {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|item| {
-                        let info = item.get("account")?.get("data")?.get("parsed")?.get("info")?;
+                        let info = item
+                            .get("account")?
+                            .get("data")?
+                            .get("parsed")?
+                            .get("info")?;
                         Some(TokenAccount {
                             mint: info.get("mint")?.as_str()?.to_string(),
                             owner: info.get("owner")?.as_str()?.to_string(),
-                            amount: info.get("tokenAmount")?.get("uiAmount")?.as_f64().unwrap_or(0.0) as u64,
-                            delegate: info.get("delegate").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            amount: info
+                                .get("tokenAmount")?
+                                .get("uiAmount")?
+                                .as_f64()
+                                .unwrap_or(0.0) as u64,
+                            delegate: info
+                                .get("delegate")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string()),
                             state: info.get("state")?.as_str()?.to_string(),
                         })
                     })
@@ -206,7 +236,10 @@ impl RpcClient {
         Ok(accounts)
     }
 
-    pub fn get_token_largest_accounts(&self, mint: &str) -> Result<Vec<TokenLargestAccount>, String> {
+    pub fn get_token_largest_accounts(
+        &self,
+        mint: &str,
+    ) -> Result<Vec<TokenLargestAccount>, String> {
         let params = serde_json::json!([mint]);
         let result = self.post_json("getTokenLargestAccounts", Some(params))?;
         let accounts = result
@@ -230,7 +263,10 @@ impl RpcClient {
         let encoded = crate::encoding::encode_base64(tx_bytes);
         let params = serde_json::json!([encoded, { "encoding": "base64" }]);
         let result = self.post_json("sendTransaction", Some(params))?;
-        result.as_str().map(|s| s.to_string()).ok_or_else(|| "missing signature".to_string())
+        result
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "missing signature".to_string())
     }
 
     /// Get recent transaction signatures for an address (getSignaturesForAddress).
@@ -275,7 +311,9 @@ mod tests {
         RpcClient::with_transport(
             "http://mock".into(),
             None,
-            Box::new(MockTransport { handler: Box::new(handler) }),
+            Box::new(MockTransport {
+                handler: Box::new(handler),
+            }),
         )
     }
 

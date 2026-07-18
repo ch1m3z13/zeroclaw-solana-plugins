@@ -78,7 +78,11 @@ mod component {
             let parsed: ExecuteArgs = match serde_json::from_str(&args) {
                 Ok(a) => a,
                 Err(e) => {
-                    emit(PluginAction::Fail, PluginOutcome::Failure, "invalid arguments");
+                    emit(
+                        PluginAction::Fail,
+                        PluginOutcome::Failure,
+                        "invalid arguments",
+                    );
                     return Ok(ToolResult {
                         success: false,
                         output: String::new(),
@@ -95,7 +99,11 @@ mod component {
                             assessment.risk, assessment.mint
                         )
                     });
-                    emit(PluginAction::Complete, PluginOutcome::Success, "risk assessed");
+                    emit(
+                        PluginAction::Complete,
+                        PluginOutcome::Success,
+                        "risk assessed",
+                    );
                     Ok(ToolResult {
                         success: true,
                         output,

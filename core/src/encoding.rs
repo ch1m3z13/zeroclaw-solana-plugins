@@ -5,7 +5,9 @@ pub fn encode_base58(data: &[u8]) -> String {
 
 /// Decode base58 string to bytes.
 pub fn decode_base58(s: &str) -> Result<Vec<u8>, String> {
-    bs58::decode(s).into_vec().map_err(|e| format!("base58: {e}"))
+    bs58::decode(s)
+        .into_vec()
+        .map_err(|e| format!("base58: {e}"))
 }
 
 fn b64_table() -> [i16; 256] {

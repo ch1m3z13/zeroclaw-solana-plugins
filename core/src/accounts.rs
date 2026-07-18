@@ -11,12 +11,13 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25e
 pub fn derive_ata(wallet: &str, mint: &str) -> Result<String, String> {
     let wallet_bytes = crate::encoding::decode_base58(wallet)
         .map_err(|e| format!("invalid wallet address: {e}"))?;
-    let mint_bytes = crate::encoding::decode_base58(mint)
-        .map_err(|e| format!("invalid mint address: {e}"))?;
+    let mint_bytes =
+        crate::encoding::decode_base58(mint).map_err(|e| format!("invalid mint address: {e}"))?;
     let token_program_bytes = crate::encoding::decode_base58(TOKEN_PROGRAM_ID)
         .map_err(|e| format!("invalid token program: {e}"))?;
-    let associated_token_program_bytes = crate::encoding::decode_base58(ASSOCIATED_TOKEN_PROGRAM_ID)
-        .map_err(|e| format!("invalid associated token program: {e}"))?;
+    let associated_token_program_bytes =
+        crate::encoding::decode_base58(ASSOCIATED_TOKEN_PROGRAM_ID)
+            .map_err(|e| format!("invalid associated token program: {e}"))?;
 
     let seeds: [&[u8]; 3] = [
         wallet_bytes.as_slice(),
@@ -57,7 +58,9 @@ mod tests {
 
     #[test]
     fn valid_pubkey_check() {
-        assert!(is_valid_pubkey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
+        assert!(is_valid_pubkey(
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        ));
         assert!(!is_valid_pubkey("too-short"));
         assert!(!is_valid_pubkey(""));
     }

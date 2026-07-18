@@ -150,9 +150,21 @@ pub fn encode_token_transfer(
     Instruction {
         program_id: TOKEN_PROGRAM_ID.to_string(),
         accounts: vec![
-            AccountMeta { pubkey: source.to_string(), is_signer: false, is_writable: true },
-            AccountMeta { pubkey: destination.to_string(), is_signer: false, is_writable: true },
-            AccountMeta { pubkey: authority.to_string(), is_signer: true, is_writable: false },
+            AccountMeta {
+                pubkey: source.to_string(),
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: destination.to_string(),
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: authority.to_string(),
+                is_signer: true,
+                is_writable: false,
+            },
         ],
         data,
     }

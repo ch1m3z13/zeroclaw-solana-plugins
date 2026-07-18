@@ -55,7 +55,9 @@ pub struct LpInfo {
 }
 
 /// Risk level for a token.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum RiskScore {
     Green,
     Amber,
@@ -136,17 +138,11 @@ pub enum WatchResult {
         confirmed: bool,
     },
     #[serde(rename = "watching")]
-    Watching {
-        message: String,
-    },
+    Watching { message: String },
     #[serde(rename = "timeout")]
-    Timeout {
-        message: String,
-    },
+    Timeout { message: String },
     #[serde(rename = "error")]
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// Configuration section injected by the host.
