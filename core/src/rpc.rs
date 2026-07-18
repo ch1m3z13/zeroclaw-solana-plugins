@@ -51,6 +51,7 @@ impl Transport for MockTransport {
 
 /// Host-only default transport. Errors if a request is actually issued —
 /// host code must inject `MockTransport` (or a real one) before calling RPC.
+#[allow(dead_code)]
 struct NullTransport;
 
 impl Transport for NullTransport {
@@ -77,8 +78,8 @@ impl Transport for WakiTransport {
             .headers(headers.iter().map(|(k, v)| (*k, *v)))
             .send()
             .map_err(|e| format!("http: {e}"))?;
-        let status = response.status();
-        let bytes = response.body().read_to_end().map_err(|e| format!("read: {e}"))?;
+        let status = response.status_code();
+        let bytes = response.body().map_err(|e| format!("read: {e}"))?;
         if status != 200 {
             return Err(format!("rpc {status}: {}", String::from_utf8_lossy(&bytes)));
         }

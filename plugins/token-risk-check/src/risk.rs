@@ -62,12 +62,12 @@ fn fetch_lp_info(mint_address: &str) -> Option<LpInfo> {
     );
 
     let response = waki::Client::new().get(&url).send().ok()?;
-    let status = response.status();
+    let status = response.status_code();
     if status != 200 {
         return None;
     }
 
-    let body = response.body().read_to_end().ok()?;
+    let body = response.body().ok()?;
     let json: serde_json::Value = serde_json::from_slice(&body).ok()?;
 
     // If Jupiter returns a route, a pool exists
