@@ -1,0 +1,8 @@
+# plugins/arc-pay-router/manifest.toml
+name = "arc-pay-router"
+version = "0.1.0"
+description = "Propose multi-chain payment routes via Arc; T1 custody (propose-only)"
+author = "ch1m3z13"
+wasm_path = "arc_pay_router.wasm"
+capabilities = ["tool"]
+permissions = ["http_client", "config_read"]

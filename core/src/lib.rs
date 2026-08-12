@@ -1,5 +1,6 @@
 // core/src/lib.rs
 pub mod accounts;
+pub mod arc;
 pub mod encoding;
 pub mod mint;
 pub mod pay;

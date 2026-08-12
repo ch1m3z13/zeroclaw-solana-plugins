@@ -27,7 +27,7 @@ struct JsonRpcRequest {
 }
 
 #[derive(Deserialize)]
-struct JsonRpcResponse {
+pub struct JsonRpcResponse {
     result: Option<serde_json::Value>,
     error: Option<JsonRpcError>,
 }
@@ -123,7 +123,7 @@ impl RpcClient {
         }
     }
 
-    fn post_json(
+    pub fn post_json(
         &self,
         method: &'static str,
         params: Option<serde_json::Value>,

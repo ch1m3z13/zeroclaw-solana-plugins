@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/zeroclaw-solana-plugins]
+  pull_request:
+
+jobs:
+  host-tests:
+    name: Host tests (no wasm toolchain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+            plugins/*/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+      - name: Test core
+        run: cd core && cargo test
+      - name: Test token-risk-check
+        run: cd plugins/token-risk-check && cargo test
+      - name: Test solana-pay-request
+        run: cd plugins/solana-pay-request && cargo test
+      - name: Test payment-watch
+        run: cd plugins/payment-watch && cargo test
+      - name: Test arc-pay-router
+        run: cd plugins/arc-pay-router && cargo test

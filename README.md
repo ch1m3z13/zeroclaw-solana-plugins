@@ -1,34 +1,48 @@
-# Zeroclaw Solana Plugins
+# ZeroClaw Solana Plugins
 
-Three WASM tool plugins for the [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)
-AI agent runtime, enabling safe Solana payments and token intelligence.
+**Open-source WASM tool plugins that make Solana payments safe-by-default for AI agents.**
+Built for the [Solana Foundation Nigeria Grants](https://superteam.fun/earn/grants/solana-foundation-nigeria-grants/)
+(Superteam Nigeria) — advancing **Payments** (Solana Pay P2P + commerce) and
+**Developer Tooling** for a more censorship-resistant Solana.
 
-**Submission for**: [Build Solana-native plugins for Zeroclaw](https://superteam.fun/earn/listing/zeroclaw/)
-**Tracks**: A (Payments) + D (Onchain Intelligence) + E (Shared Core)
+> Four WASM tool plugins for the [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw)
+> AI agent runtime. Pure-Rust core, zero wasm dependencies, host-testable with mock RPC,
+> fail-closed, and custody-aware (T1: propose-only, never sign).
 
-## What's included
+## Why this matters
 
-| Plugin | Tier | Track | What it does |
-|--------|------|-------|-------------|
-| [`token-risk-check`](plugins/token-risk-check/) | T0 | D | Check SPL token risk: mint authority, freeze authority, Token-2022 extensions, holder concentration, LP status |
-| [`solana-pay-request`](plugins/solana-pay-request/) | T1 | A | Generate Solana Pay transfer-request URLs with built-in risk gating |
-| [`payment-watch`](plugins/payment-watch/) | T0 | A | Watch an address for expected SPL token payments, report when they land |
+AI agents are starting to move money. The default is dangerous: an agent that can
+sign transactions can be prompted into sending funds to a scam token, a drained wallet,
+or a malicious contract. This project is a **payment safety layer** that sits between
+the agent and the chain:
 
-All three share a pure-Rust core crate ([`core/`](core/)) that handles RPC, mint decoding,
-risk scoring, and URL construction with zero wasm dependencies.
+- **Every payment is risk-gated.** Tokens are scored green/amber/red from on-chain data
+  (mint authority, freeze authority, Token-2022 extensions, holder concentration, LP status).
+- **The agent never holds the keys.** Plugins return *unsigned proposals* only. A human or a
+  Squads multisig disposes. Custody stays T1 — "the agent proposes, the multisig disposes."
+- **Fail-closed.** RPC errors, unknown tokens, and red risk scores all surface as errors —
+  never a fabricated success. No "skip check" parameter exists anywhere (prompt-injection safe).
 
-## The combined pitch
+## The four plugins
 
-**A payment terminal that can't be scammed.**
+| Plugin | Tier | What it does |
+|--------|------|-------------|
+| [`token-risk-check`](plugins/token-risk-check/) | T0 | Check SPL token risk from on-chain data |
+| [`solana-pay-request`](plugins/solana-pay-request/) | T1 | Generate Solana Pay URLs, gated on risk |
+| [`payment-watch`](plugins/payment-watch/) | T0 | Watch an address for expected payments |
+| [`arc-pay-router`](plugins/arc-pay-router/) | T1 | Propose multi-chain routes via Arc (Solana ↔ EVM) |
+
+## The combined pitch: a payment terminal that can't be scammed
 
 1. DM your agent *"charge table 4 for 25 USDC"*
 2. `solana-pay-request` calls `token-risk-check` on USDC → green
-3. QR code appears in chat with a `solana:` URL
-4. Customer scans → wallet builds tx with fresh blockhash → pays
-5. `payment-watch` detects the payment → agent confirms: "Invoice #412 paid"
+3. A QR code appears in chat with a `solana:` URL
+4. Customer scans → their wallet builds the tx with a fresh blockhash → pays
+5. `payment-watch` detects the payment → agent confirms: *"Invoice #412 paid"*
 
-The risk-checker is the safety gate. Every payment goes through it. Dynamic risk
-scoring beats hardcoded allowlists.
+`arc-pay-router` extends this to multi-chain: route SOL on Solana to USDC on Ethereum
+through Arc's unified balance + quote API, still gated by the same risk engine on the
+Solana leg and still T1 (propose-only).
 
 ## Architecture
 
@@ -38,91 +52,70 @@ core/                    # Pure Rust, no wasm deps
 ├── mint.rs             # SPL Token + Token-2022 TLV decoding
 ├── risk.rs             # Risk scoring engine (green/amber/red)
 ├── pay.rs              # Solana Pay URL construction
-├── tx.rs               # Legacy transaction assembly
+├── tx.rs               # Transaction assembly
 ├── encoding.rs         # bs58/base64 helpers
 ├── accounts.rs         # ATA derivation + pubkey validation
+├── arc.rs              # Arc multi-chain client (new in this grant cycle)
 └── types.rs            # Shared types
 
 plugins/
-├── token-risk-check/   # T0 — reads on-chain data, returns risk assessment
+├── token-risk-check/   # T0 — reads on-chain data, returns risk
 ├── solana-pay-request/ # T1 — generates solana: URL, gates on risk
-└── payment-watch/      # T0 — polls for payment confirmation
+├── payment-watch/      # T0 — polls for payment confirmation
+└── arc-pay-router/     # T1 — multi-chain route proposal via Arc
 ```
 
 Each plugin follows the `redact-text` reference layout:
 ```
-src/
-├── [domain].rs    # pure logic, no wasm deps — host-testable
-└── lib.rs         # thin #[cfg(target_family = "wasm")] shim
+src/[domain].rs    # pure logic, no wasm deps — host-testable
+src/lib.rs         # thin #[cfg(target_family = "wasm")] shim
 tests/             # host-run integration tests
 manifest.toml      # name, version, wasm_path, capabilities, permissions
 README.md          # what it does, config keys, custody tier, threat model
 ```
 
-## Build
+## Build & test
 
 ```bash
-# Host tests (no wasm toolchain needed)
-cd core && cargo test
-cd plugins/token-risk-check && cargo test
-cd plugins/solana-pay-request && cargo test
-cd plugins/payment-watch && cargo test
+# Host tests — no wasm toolchain or network needed
+cd core && cargo test --offline
+cd plugins/token-risk-check && cargo test --offline
+cd plugins/solana-pay-request && cargo test --offline
+cd plugins/payment-watch && cargo test --offline
+cd plugins/arc-pay-router && cargo test --offline
 
 # WASM components
 rustup target add wasm32-wasip2
-cd plugins/token-risk-check && cargo build --target wasm32-wasip2 --release
-cd plugins/solana-pay-request && cargo build --target wasm32-wasip2 --release
-cd plugins/payment-watch && cargo build --target wasm32-wasip2 --release
+cd plugins/<plugin> && cargo build --target wasm32-wasip2 --release
 ```
 
-> **WIT note:** this repo vendors the official `zeroclaw-plugins` WIT (`wit/v0/`, multi-file
-> package `zeroclaw:plugin@0.1.0`, gated behind `@unstable(feature = plugins-wit-v0)`). It is
-> byte-aligned with the runtime via `wit/UPSTREAM_REF`. Components build offline and are
-> ABI-compatible with the real ZeroClaw host. Advance the pin and `wit/v0` together in one change.
+CI runs the host tests on every push (see `.github/workflows/ci.yml`).
 
 ## Custody design
 
 | Tier | Plugins | What | Why safe |
 |------|---------|------|----------|
 | **T0** | token-risk-check, payment-watch | Read-only | No keys, no signing, no fund movement |
-| **T1** | solana-pay-request | Build URL | Returns URL only — payer's wallet builds and signs at scan time |
+| **T1** | solana-pay-request, arc-pay-router | Build URL / propose route | Returns unsigned artifact only — wallet/multisig signs |
 
-T2 (sign and submit) is not implemented. The best pattern is "the agent proposes,
-a Squads multisig disposes" — the plugin builds the transaction, submits as a
-multisig proposal, and a human approves from their phone.
+T2 (sign and submit) is intentionally not implemented. The best pattern is
+"the agent proposes, a Squads multisig disposes."
 
-## Threat model
+## Open source
 
-### Prompt injection
-
-Every plugin has been tested against prompt injection attacks. The results are in
-each plugin's README. Summary:
-
-- **token-risk-check**: Cannot be told to return a specific risk result. Deterministic
-  from on-chain data. No override parameter.
-- **solana-pay-request**: Cannot bypass risk check. Hardcoded in `execute()` — no skip
-  parameter exists. Fail-closed on RPC errors.
-- **payment-watch**: Cannot fabricate payments. Queries real on-chain transaction data.
-  Fail-closed on RPC errors.
-
-### Fail-closed principle
-
-All plugins fail to a safe state:
-- RPC errors → return error/red, never green/paid
-- Invalid input → return error, never partial results
-- Unknown tokens → refuse to process, never assume safe
+MIT licensed. This project is being developed in the open as part of the
+Solana Foundation Nigeria Grants program. See [GRANT.md](GRANT.md) for the
+milestone plan and funding use.
 
 ## What fought us on wasm32-wasip2
 
-- `solana-sdk` / `solana-client` won't compile for wasm32-wasip2 inside a WIT component
+- `solana-sdk` / `solana-client` won't compile for wasm32-wasip2 inside a WIT component.
 - Used `waki` (blocking `wasi:http`) + `serde_json` + `bs58` instead. No `solana-sdk`
   dependency at all — mint decoding and transaction assembly are hand-rolled from raw
   on-chain bytes.
-- Token-2022 TLV parsing hand-rolled (spl-token-2022 won't compile clean for wasm)
-- Transaction assembly uses manual instruction encoding
-- Base58/base64 helpers implemented in `core/encoding.rs` (no external dep needed)
+- Token-2022 TLV parsing hand-rolled (spl-token-2022 won't compile clean for wasm).
 - `RpcClient::new` is wasm-only (uses `waki`); host tests inject `MockTransport` via
-  `RpcClient::with_transport`
+  `RpcClient::with_transport`.
 
 ## License
 
