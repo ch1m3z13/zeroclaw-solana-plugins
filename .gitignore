@@ -7,3 +7,7 @@ Cargo.lock
 *.swo
 .idea/
 .vscode/
+
+MEMORY.md
+PR_BODY.md
+docs/compose
